@@ -1,9 +1,5 @@
 # Contributing to Shadowbroker
 
-[https://docs.google.com/document/d/1thuyugdJcIwoHI_tWDaA_mUvBE1rfDEd/edit](https://docs.google.com/document/d/1XjOG2r5iBNni0I3Df7aZ4me7qTY2G_cD/edit?usp=sharing&ouid=115703754308069635744&rtpof=true&sd=true)
-
-https://docs.google.com/document/d/1qN1n9tduXmX_q46Vy9ZVb_E2EV1lHgXF/edit?usp=sharing&ouid=115703754308069635744&rtpof=true&sd=true
-
 > **Global Threat Intercept — Real-Time Geospatial Intelligence Platform**  
 > Contributor guide covering installation, Spain CCTV integration, STIX export, and analyst workflow.
 
@@ -21,6 +17,7 @@ https://docs.google.com/document/d/1qN1n9tduXmX_q46Vy9ZVb_E2EV1lHgXF/edit?usp=sh
 8. [Suggested Next Contributions](#8-suggested-next-contributions)
 9. [Legal Status of All Data Sources](#9-legal-status-of-all-data-sources)
 10. [Quick Reference](#10-quick-reference)
+11. [Extended Documentation](#11-extended-documentation)
 
 ---
 
@@ -502,6 +499,42 @@ git push origin feature/your-feature-name
 ```
 
 Then open `https://github.com/YOUR_USERNAME/Shadowbroker` and click **Compare & pull request**.
+
+---
+
+## 11. Extended Documentation
+
+Full reference documentation for this contribution is available as two companion guides:
+
+---
+
+### 📘 Shadowbroker Contributor & Setup Guide
+
+**[→ Open Document](https://docs.google.com/document/d/1thuyugdJcIwoHI_tWDaA_mUvBE1rfDEd/edit)**
+
+Covers everything needed to get the platform running from zero on a new Windows machine:
+
+- Python 3.12 installation (why 3.14 breaks, exact installer URL)
+- All dependency installs with correct commands for Windows PowerShell
+- `.env` file creation without encoding corruption
+- Every error encountered during development with exact cause and fix (20+ errors documented)
+- CCTV camera seeding and the fetch_cctv slow-tier timing issue
+- Daily startup quick reference
+
+---
+
+### 📗 Shadowbroker Analyst Walkthrough
+
+**[→ Open Document](https://docs.google.com/document/d/1qN1n9tduXmX_q46Vy9ZVb_E2EV1lHgXF/edit?usp=sharing)**
+
+Step-by-step guide for using the platform as an intelligence analyst:
+
+- How GPS jamming is detected passively from ADS-B NAC-P values
+- Cross-referencing military holding patterns with jamming zones
+- Using Spain CCTV cameras for visual ground truth
+- Reading GDELT events and tone scores
+- Confidence assessment across multiple independent signal layers
+- Exporting findings as a STIX 2.1 bundle for SIEM ingestion
 
 ---
 
