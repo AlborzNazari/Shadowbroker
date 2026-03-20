@@ -78,6 +78,20 @@ def build_stix_bundle(latest_data: Dict[str, Any]) -> Dict[str, Any]:
     military = latest_data.get("military_flights", [])
     objects.extend(_military_holding_to_stix(military))
 
+    # Camera anomaly alerts — inject observed-data objects from cctv_alert pipeline
+    try:
+        from services.cctv_alert import get_active_alerts, alerts_to_stix_objects
+        active_alerts = get_active_alerts()
+        camera_stix = alerts_to_stix_objects(active_alerts)
+        objects.extend(camera_stix)
+    except ImportError:
+        active_alerts = []
+        camera_stix = []
+    except Exception as e:
+        logger.warning(f"STIX exporter: failed to inject camera alerts: {e}")
+        active_alerts = []
+        camera_stix = []
+
     bundle = {
         "type": "bundle",
         "id": f"bundle--{_new_uuid()}",
@@ -89,7 +103,7 @@ def build_stix_bundle(latest_data: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(
         f"STIX bundle built: {len(incidents)} incidents, "
         f"{len(locations)} locations, {len(relationships)} relationships, "
-        f"{len(jamming)} jamming zones"
+        f"{len(jamming)} jamming zones, {len(camera_stix)} camera alerts"
     )
     return bundle
 
