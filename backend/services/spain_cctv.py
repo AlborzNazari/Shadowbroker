@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Returns XML with <cctvCameraRecord> elements containing id, coords, image URL.
 # Note: excludes Basque Country (managed by Ertzaintza) and Catalonia (SCT).
 DGT_DATEX2_URL = (
-    "https://infocar.dgt.es/datex2/dgt/CCTVSiteTablePublication/all/content.xml"
+    "http://infocar.dgt.es/datex2/dgt/PredefinedLocationsPublication/camaras/content.xml"
 )
 
 # Still image URL pattern — substitute {id} with the camera serial from the XML.
