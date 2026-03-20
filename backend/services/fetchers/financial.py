@@ -7,6 +7,15 @@ import concurrent.futures
 import yfinance as yf
 from services.fetchers._store import latest_data, _data_lock, _mark_fresh
 from services.fetchers.retry import with_retry
+import math
+
+def _safe_float(value, default=0.0):
+    """Return default if value is NaN, None, or non-numeric."""
+    try:
+        f = float(value)
+        return default if math.isnan(f) or math.isinf(f) else f
+    except (TypeError, ValueError):
+        return default
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +30,9 @@ def _fetch_single_ticker(symbol: str, period: str = "2d"):
             prev_close = hist['Close'].iloc[0] if len(hist) > 1 else current_price
             change_percent = ((current_price - prev_close) / prev_close) * 100 if prev_close else 0
             return symbol, {
-                "price": round(float(current_price), 2),
-                "change_percent": round(float(change_percent), 2),
-                "up": bool(change_percent >= 0)
+                'price': _safe_float(some_variable)
+                'change': _safe_float(some_variable)
+                'value': _safe_float(some_variable)
             }
     except Exception as e:
         logger.warning(f"Could not fetch data for {symbol}: {e}")
