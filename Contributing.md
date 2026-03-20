@@ -1,5 +1,9 @@
 # Contributing to Shadowbroker
 
+[https://docs.google.com/document/d/1thuyugdJcIwoHI_tWDaA_mUvBE1rfDEd/edit](https://docs.google.com/document/d/1XjOG2r5iBNni0I3Df7aZ4me7qTY2G_cD/edit?usp=sharing&ouid=115703754308069635744&rtpof=true&sd=true)
+
+https://docs.google.com/document/d/1qN1n9tduXmX_q46Vy9ZVb_E2EV1lHgXF/edit?usp=sharing&ouid=115703754308069635744&rtpof=true&sd=true
+
 > **Global Threat Intercept — Real-Time Geospatial Intelligence Platform**  
 > Contributor guide covering installation, Spain CCTV integration, STIX export, and analyst workflow.
 
