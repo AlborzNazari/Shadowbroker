@@ -65,10 +65,10 @@ class DGTNationalIngestor(BaseCCTVIngestor):
         </cctvCameraRecord>
       </cctvSiteTable>
     """
-
-    def fetch_data(self) -> List[Dict[str, Any]]:
+def fetch_data(self) -> List[Dict[str, Any]]:
         try:
-            response = fetch_with_curl(DGT_DATEX2_URL, timeout=30)
+            import requests
+            response = requests.get(DGT_DATEX2_URL, timeout=30, allow_redirects=False)
             response.raise_for_status()
         except Exception as e:
             logger.error(f"DGTNationalIngestor: failed to fetch DATEX2 feed: {e}")
