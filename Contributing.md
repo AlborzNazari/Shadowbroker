@@ -1,7 +1,7 @@
 # Contributing to Shadowbroker
 
 > **Global Threat Intercept — Real-Time Geospatial Intelligence Platform**  
-> Contributor guide covering installation, Spain CCTV integration, STIX export, and analyst workflow.
+> Contributor guide covering installation, Spain + USA CCTV integration, alert pipeline, STIX 2.1 export, and analyst workflow.
 
 ---
 
@@ -12,12 +12,14 @@
 3. [Installation from Scratch](#3-installation-from-scratch)
 4. [Running the Platform](#4-running-the-platform)
 5. [Spain CCTV Integration](#5-spain-cctv-integration)
-6. [STIX 2.1 Export](#6-stix-21-export)
-7. [Analyst Walkthrough — Step by Step](#7-analyst-walkthrough--step-by-step)
-8. [Suggested Next Contributions](#8-suggested-next-contributions)
-9. [Legal Status of All Data Sources](#9-legal-status-of-all-data-sources)
-10. [Quick Reference](#10-quick-reference)
-11. [Extended Documentation](#11-extended-documentation)
+6. [USA CCTV Integration](#6-usa-cctv-integration)
+7. [CCTV Alert Pipeline](#7-cctv-alert-pipeline)
+8. [STIX 2.1 Export](#8-stix-21-export)
+9. [Analyst Walkthrough — Step by Step](#9-analyst-walkthrough--step-by-step)
+10. [Suggested Next Contributions](#10-suggested-next-contributions)
+11. [Legal Status of All Data Sources](#11-legal-status-of-all-data-sources)
+12. [Quick Reference](#12-quick-reference)
+13. [Extended Documentation](#13-extended-documentation)
 
 ---
 
@@ -43,7 +45,7 @@ Built with **Next.js**, **MapLibre GL**, **FastAPI**, and **Python**.
 | AIS Vessels (25k+) | aisstream.io WebSocket | ON |
 | Satellites | N2YO / CelesTrak | ON |
 | Earthquakes | USGS real-time feed | ON |
-| CCTV Mesh | TfL, NYC, Austin, Singapore, **Spain** | OFF |
+| CCTV Mesh | TfL, NYC, Austin, Singapore, **Spain**, **USA** | OFF |
 | GPS Jamming | NAC-P degradation analysis | ON |
 | Ukraine Frontline | DeepState Map GeoJSON | ON |
 | Global Incidents | GDELT Project | ON |
@@ -224,13 +226,150 @@ Both sources are published under Spain's open data framework — **Ley 37/2007**
 
 ---
 
-## 6. STIX 2.1 Export
+## 6. USA CCTV Integration
 
-### 6.1 What It Does
+### 6.1 What Was Added
+
+A new file `backend/services/usa_cctv.py` adds 7 state DOT camera ingestors covering major US military installation corridors. Every ingestor follows the same `BaseCCTVIngestor` pattern as Spain — same database schema, same scheduler registration, same API output.
+
+| State | Key Installations Covered | Cameras | API Key |
+|-------|--------------------------|---------|---------|
+| Washington (WSDOT) | JBLM, Bremerton Naval, Whidbey Island NAS, Fairchild AFB | 10+ live | None |
+| Virginia (VDOT) | Pentagon, Quantico MCB, Langley AFB, Norfolk Naval | seed + live | Free reg |
+| Texas (TxDOT) | Fort Cavazos, Fort Bliss, Dyess AFB, Lackland AFB | seed | None |
+| Nevada/Utah | Nellis AFB, Area 51 corridor, Hill AFB, Dugway Proving Ground | seed | None |
+| Florida (FDOT) | MacDill AFB (CENTCOM/SOCOM), Patrick SFB, Eglin AFB, NAS Jacksonville | seed | None |
+| California (Caltrans) | Camp Pendleton, Edwards AFB, Vandenberg SFB, MCAS Miramar | seed + live | None |
+| Georgia (GDOT) | Fort Moore, Fort Eisenhower, Robins AFB, Moody AFB | seed | None |
+
+### 6.2 Strategic Rationale
+
+States were selected for proximity to major military installations. When Shadowbroker detects GPS jamming or a military ISR aircraft in a holding pattern over a US corridor, nearby cameras provide visual ground truth on:
+
+- Highway traffic near base access roads — unusual convoys or closures
+- Security cordons — empty roads at peak hours near installations
+- Emergency vehicle concentration — unusual activity near gates
+- Base perimeter road anomalies
+
+### 6.3 Wiring Into the Scheduler
+
+```python
+from services.usa_cctv import (
+    WSDOTIngestor, VDOTIngestor, TxDOTStatewideIngestor,
+    NevadaUtahIngestor, FloridaDOTIngestor,
+    CaliforniaDOTIngestor, GeorgiaDOTIngestor,
+)
+
+_scheduler.add_job(WSDOTIngestor().ingest, 'interval', minutes=10, id='cctv_wsdot', ...)
+_scheduler.add_job(VDOTIngestor().ingest,  'interval', minutes=10, id='cctv_vdot',  ...)
+# ... all 7 registered
+```
+
+### 6.4 First-Time Setup
+
+Run `update_cameras.py` once after seeding to populate confirmed DOT image URLs:
+
+```powershell
+cd backend
+py -3.12 seed_usa.py
+py -3.12 update_cameras.py
+```
+
+Then force the API to pick up the new cameras:
+
+```powershell
+py -3.12 -c "from services.fetchers.infrastructure import fetch_cctv; fetch_cctv(); print('done')"
+```
+
+### 6.5 Legal Status
+
+All sources are US Government public open data published under state DOT open data policies. Free reuse with attribution. The WSDOT API requires no registration. Virginia DOT requires a free developer key at `511virginia.org/developers`. All other sources work without keys via seed camera fallbacks.
+
+---
+
+## 7. CCTV Alert Pipeline
+
+### 7.1 What It Does
+
+`backend/services/cctv_alert.py` automatically connects the camera layer to active threat events. It runs every 5 minutes as a background job and does three things in sequence.
+
+### 7.2 Stage 1 — Spatial Join
+
+Every 5 minutes the pipeline queries all active GPS jamming zones and military holding patterns from `latest_data`. For each event it finds every camera within 25 kilometers using the haversine formula:
+
+```python
+def cameras_within_radius(cameras, event_lat, event_lon, radius_km=25):
+    return [cam for cam in cameras
+            if haversine(event_lat, event_lon, cam['lat'], cam['lon']) <= radius_km
+            and cam['media_url']]
+```
+
+Cameras with empty `media_url` are excluded — no URL means nothing to analyze.
+
+### 7.3 Stage 2 — Change Detection
+
+For each candidate camera the pipeline fetches the current still image, converts it to a 160×120 grayscale numpy array, and compares it against a rolling baseline:
+
+```python
+def _pixel_change_score(frame_a, frame_b):
+    diff = np.abs(frame_a - frame_b)
+    return float(diff.mean() / 255.0)
+```
+
+Score thresholds observed in practice:
+
+| Score | Meaning |
+|-------|---------|
+| < 0.02 | Lighting change only — ignore |
+| 0.02–0.08 | Normal traffic variation |
+| 0.08–0.12 | Moderate change — log only |
+| > 0.12 | **Alert fires** — significant scene change |
+| > 0.30 | Possible camera blackout or obstruction |
+
+No computer vision model required. Pillow and numpy are the only dependencies.
+
+### 7.4 Stage 3 — STIX observed-data Export
+
+When an alert fires, a STIX 2.1 `observed-data` object is written into the alert cache:
+
+```python
+{
+  "type": "observed-data",
+  "labels": ["cctv-anomaly-near-jamming", "visual-change-detection"],
+  "extensions": {
+    "extension-definition--shadowbroker-cctv-alert": {
+      "camera_id": "WSDOT-S001",
+      "change_score": 0.22,
+      "correlated_event_id": "JAM-47.150--122.440",
+      "distance_km": 8.3
+    }
+  }
+}
+```
+
+This object is injected into the STIX bundle at `/api/stix/bundle` automatically. A SIEM receiving the bundle now sees all three correlated objects — jamming zone, ISR aircraft, and visual camera anomaly — in a single structured document.
+
+### 7.5 Alert Types
+
+| Alert Type | Trigger |
+|------------|---------|
+| `CCTV_ANOMALY_NEAR_JAMMING` | Camera within 25km of active GPS jamming zone shows change score > 0.12 |
+| `CCTV_ANOMALY_NEAR_HOLDING` | Camera within 25km of military ISR holding pattern shows change score > 0.12 |
+| `CCTV_BLACKOUT` | Camera that was previously returning images fails 3 consecutive fetches near an active event |
+
+### 7.6 What You See in the UI
+
+When you click a green camera dot near an active jamming zone, the detail panel shows the GDELT region dossier — news events from that geographic area surfaced automatically. This is Shadowbroker's existing `region_dossier` feature firing on your camera coordinates. Combined with the live still image, you get signals intelligence (jamming), visual ground truth (camera image), and geopolitical context (GDELT news) in a single click.
+
+---
+
+## 8. STIX 2.1 Export
+
+### 8.1 What It Does
 
 `backend/services/stix_exporter.py` wraps Shadowbroker's live data into a STIX 2.1 bundle consumable by enterprise SIEMs.
 
-### 6.2 Exported Object Types
+### 8.2 Exported Object Types
 
 | STIX Type | Source Data | What It Represents |
 |-----------|-------------|-------------------|
@@ -239,14 +378,14 @@ Both sources are published under Spain's open data framework — **Ley 37/2007**
 | `indicator` | Military holding patterns | ISR orbit activity — callsign, type, coordinates, turn degrees |
 | `relationship` | Auto-generated | Links each incident to its geographic location |
 
-### 6.3 Endpoint
+### 8.3 Endpoint
 
 ```
 GET http://localhost:8000/api/stix/bundle
 GET http://localhost:8000/api/stix/bundle?pretty=true
 ```
 
-### 6.4 Consuming the Bundle
+### 8.4 Consuming the Bundle
 
 | Platform | How to Consume |
 |----------|---------------|
@@ -257,7 +396,7 @@ GET http://localhost:8000/api/stix/bundle?pretty=true
 
 ---
 
-## 7. Analyst Walkthrough — Step by Step
+## 9. Analyst Walkthrough — Step by Step
 
 The value of Shadowbroker is correlation — when multiple independent data sources light up in the same geographic area at the same time.
 
@@ -437,7 +576,7 @@ A finding requires at least **two independent data sources** pointing to the sam
 
 ---
 
-## 8. Suggested Next Contributions
+## 10. Suggested Next Contributions
 
 ### High Impact
 
@@ -457,12 +596,19 @@ A finding requires at least **two independent data sources** pointing to the sam
 
 ---
 
-## 9. Legal Status of All Data Sources
+## 11. Legal Status of All Data Sources
 
 | Source | License | API Key | Attribution Required |
 |--------|---------|---------|---------------------|
 | Madrid City Hall cameras | Madrid Open Data — free reuse with attribution | None | Yes |
 | DGT Spain cameras | Ley 37/2007, EU PSI Directive 2019/1024 | None | Yes |
+| WSDOT Washington State | WA State DOT public data — free reuse | None | Yes |
+| Virginia DOT (511VA) | VA DOT open data — free with registration | Free | Yes |
+| TxDOT Texas | TX DOT public data — free reuse | None | Yes |
+| Nevada/Utah DOT | State DOT public data — free reuse | None | Yes |
+| Florida DOT (fl511) | FL DOT public data — free reuse | None | Yes |
+| Caltrans California | CA DOT public data — free reuse | None | Yes |
+| Georgia DOT (511GA) | GA DOT public data — free reuse | None | Yes |
 | OpenSky Network | CC BY 4.0 — free for non-commercial use | Optional | Yes |
 | adsb.lol | Public, free | None | Recommended |
 | USGS Earthquakes | US Government open data, public domain | None | None |
@@ -475,19 +621,23 @@ A finding requires at least **two independent data sources** pointing to the sam
 
 ---
 
-## 10. Quick Reference
+## 12. Quick Reference
 
 ### Common Commands
 
 | Task | Command |
 |------|---------|
-| Start backend | `cd backend` then `python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload` |
+| Start backend | `cd backend` then `py -3.12 -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload` |
 | Start frontend | `cd frontend` then `npm run dev` |
-| Seed Spain cameras | `python -c "from services.cctv_pipeline import init_db; from services.spain_cctv import *; init_db(); MadridCityIngestor().ingest(); DGTNationalIngestor().ingest()"` |
-| Check Spain camera count | `python -c "from services.cctv_pipeline import get_all_cameras; c=get_all_cameras(); print(len([x for x in c if 'DGT' in x['id'] or 'MAD' in x['id']]))"` |
+| Seed Spain cameras | `py -3.12 seed_spain.py` |
+| Seed USA cameras | `py -3.12 seed_usa.py` |
+| Update image URLs | `py -3.12 update_cameras.py` |
+| Force CCTV into API | `py -3.12 -c "from services.fetchers.infrastructure import fetch_cctv; fetch_cctv()"` |
+| Check total camera count | `py -3.12 -c "from services.cctv_pipeline import get_all_cameras; print(len(get_all_cameras()))"` |
+| View active alerts | `py -3.12 -c "from services.cctv_alert import get_active_alerts; print(get_active_alerts())"` |
 | View STIX bundle | `http://localhost:8000/api/stix/bundle?pretty=true` |
 | Health check | `http://localhost:8000/api/health` |
-| Reset a file from git | `python -c "import subprocess; r=subprocess.run(['git','show','main:PATH/file.py'],capture_output=True); open('PATH/file.py','wb').write(r.stdout)"` |
+| Force full refresh | `http://localhost:8000/api/refresh` |
 
 ### Git Workflow (PowerShell)
 
@@ -502,7 +652,7 @@ Then open `https://github.com/YOUR_USERNAME/Shadowbroker` and click **Compare & 
 
 ---
 
-## 11. Extended Documentation
+## 13. Extended Documentation
 
 Full reference documentation for this contribution is available as two companion guides:
 
