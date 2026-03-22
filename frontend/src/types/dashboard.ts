@@ -185,10 +185,13 @@ export interface CCTVCamera {
   id: string | number;
   lat: number;
   lon: number;
+  name?: string;
   direction_facing?: string;
   source_agency?: string;
   media_url?: string;
-  media_type?: "image" | "hls" | "mjpeg";
+  media_type?: "image" | "hls" | "mjpeg" | "video" | "embed" | "satellite";
+  last_updated?: string | null;
+  refresh_rate_seconds?: number;
 }
 
 // ─── KIWISDR RECEIVERS ─────────────────────────────────────────────────────
