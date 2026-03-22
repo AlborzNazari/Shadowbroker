@@ -117,6 +117,36 @@ def _run_cctv_alert_pipeline():
         logger.error(f"cctv_alert pipeline error: {e}")
  
  
+def _run_all_cctv_ingestors():
+    """Run every CCTV ingestor (Spain + USA + TfL/Austin/NYC) then refresh the in-memory cache.
+    Called once on startup inside update_all_data so cameras are available immediately."""
+    try:
+        all_ingestors = [
+            # Spain
+            _cctv_madrid, _cctv_dgt, _cctv_barcelona, _cctv_valencia,
+            _cctv_sevilla, _cctv_zaragoza, _cctv_bizkaia, _cctv_malaga,
+            # USA
+            _cctv_wsdot, _cctv_vdot, _cctv_txdot, _cctv_nvut,
+            _cctv_fdot, _cctv_ca, _cctv_gdot,
+            # Global (TfL, Austin, NYC, Singapore)
+        ]
+        # Also run the pipeline ingestors from cctv_pipeline.py
+        from services.cctv_pipeline import TFLJamCamIngestor, AustinTXIngestor, NYCDOTIngestor, LTASingaporeIngestor
+        all_ingestors += [TFLJamCamIngestor(), AustinTXIngestor(), NYCDOTIngestor(), LTASingaporeIngestor()]
+
+        for ing in all_ingestors:
+            try:
+                ing.ingest()
+            except Exception as e:
+                logger.warning(f"CCTV ingestor {ing.__class__.__name__} failed: {e}")
+
+        # Refresh the in-memory cache from the newly populated DB
+        fetch_cctv()
+        logger.info("CCTV startup ingest complete.")
+    except Exception as e:
+        logger.error(f"_run_all_cctv_ingestors failed: {e}")
+
+
 def update_all_data():
     """Run every fetcher once, in parallel where safe."""
     logger.info("Running full data update...")
@@ -144,7 +174,7 @@ def update_all_data():
         fetch_datacenters,
         fetch_military_bases,
         fetch_power_plants,
-        fetch_cctv,
+        _run_all_cctv_ingestors,  # runs all ingestors + fetch_cctv in one shot
         fetch_kiwisdr,
     ]
  
