@@ -550,18 +550,46 @@ from urllib.parse import unquote
 
 # Allowlist of domains we will proxy — prevents open-proxy abuse
 _CCTV_PROXY_ALLOWED_HOSTS = {
+    # Austin TX / TxDOT
     "cctv.austinmobility.io",
+    "api.its.txdot.gov",
+    "www.drivetexas.org",
+    # NYC DOT
     "webcams.nyctmc.org",
+    # Singapore LTA
     "api.data.gov.sg",
+    # Transport for London
     "api.tfl.gov.uk",
-    "its.txdot.gov",
+    # Washington State DOT
+    "images.wsdot.wa.gov",
+    # Virginia DOT
+    "www.511virginia.org",
+    # Nevada DOT
+    "nvroads.com",
+    # Utah DOT
+    "www.udottraffic.utah.gov",
+    # Florida DOT
+    "fl511.com",
+    # Caltrans California
+    "cwwp2.dot.ca.gov",
+    # Georgia DOT
+    "511ga.org",
 }
 
 # Referer headers that each host expects — spoof them so the image servers
 # don't reject our server-side request with a 403.
 _CCTV_REFERERS = {
-    "cctv.austinmobility.io": "https://cctv.austinmobility.io/",
-    "webcams.nyctmc.org":      "https://webcams.nyctmc.org/",
+    "cctv.austinmobility.io":       "https://cctv.austinmobility.io/",
+    "webcams.nyctmc.org":           "https://webcams.nyctmc.org/",
+    "images.wsdot.wa.gov":          "https://wsdot.wa.gov/",
+    "www.511virginia.org":          "https://www.511virginia.org/",
+    "nvroads.com":                  "https://nvroads.com/",
+    "www.udottraffic.utah.gov":     "https://www.udottraffic.utah.gov/",
+    "fl511.com":                    "https://fl511.com/",
+    "cwwp2.dot.ca.gov":             "https://cwwp2.dot.ca.gov/",
+    "511ga.org":                    "https://511ga.org/",
+    "www.drivetexas.org":           "https://www.drivetexas.org/",
+    "api.its.txdot.gov":            "https://its.txdot.gov/",
 }
 
 @app.get("/api/cctv/proxy-image")
