@@ -75,10 +75,12 @@ export function buildCctvGeoJSON(cameras?: CCTVCamera[], inView?: InViewFilter):
             properties: {
                 id: c.id || i,
                 type: 'cctv',
-                name: c.direction_facing || 'Camera',
+                // Prefer the explicit name field; fall back to direction_facing, then generic label
+                name: (c as any).name || c.direction_facing || 'Camera',
                 source_agency: c.source_agency || 'Unknown',
                 media_url: c.media_url || '',
-                media_type: c.media_type || 'image'
+                media_type: c.media_type || 'image',
+                last_updated: (c as any).last_updated || null,
             },
             geometry: { type: 'Point' as const, coordinates: [c.lon, c.lat] }
         }))
