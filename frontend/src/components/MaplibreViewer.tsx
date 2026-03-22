@@ -593,6 +593,7 @@ const MaplibreViewer = ({ data, activeLayers, onEntityClick, flyToLocation, sele
         frontlineGeoJSON && 'ukraine-frontline-layer',
         earthquakesGeoJSON && 'earthquakes-layer',
         satellitesGeoJSON && 'satellites-layer',
+        cctvGeoJSON && 'cctv-clusters',
         cctvGeoJSON && 'cctv-layer',
         kiwisdrGeoJSON && 'kiwisdr-clusters',
         kiwisdrGeoJSON && 'kiwisdr-layer',
@@ -1276,16 +1277,17 @@ const MaplibreViewer = ({ data, activeLayers, onEntityClick, flyToLocation, sele
                             id="cctv-layer"
                             type="circle"
                             filter={['!', ['has', 'point_count']]}
+                            
                             paint={{
                                 'circle-color': '#22c55e',
                                 'circle-radius': [
                                     'interpolate', ['linear'], ['zoom'],
-                                    2, 2,
-                                    8, 4,
-                                    14, 6
+                                    2, 4,
+                                    8, 7,
+                                    14, 10
                                 ],
                                 'circle-opacity': 0.9,
-                                'circle-stroke-width': 1,
+                                'circle-stroke-width': 2,
                                 'circle-stroke-color': '#16a34a'
                             }}
                         />
