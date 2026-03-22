@@ -519,5 +519,24 @@ async def system_update(request: Request):
     threading.Timer(2.0, schedule_restart, args=[project_root]).start()
     return result
 
+
+# ---------------------------------------------------------------------------
+# CCTV Alert Pipeline
+# ---------------------------------------------------------------------------
+from services.cctv_alert import get_active_alerts, clear_alerts
+
+@app.get("/api/cctv/alerts")
+@limiter.limit("30/minute")
+async def api_cctv_alerts(request: Request):
+    """Return all active CCTV anomaly alerts."""
+    return get_active_alerts()
+
+@app.post("/api/cctv/alerts/clear", dependencies=[Depends(require_admin)])
+@limiter.limit("10/minute")
+async def api_cctv_alerts_clear(request: Request):
+    """Clear all active CCTV alerts (admin only)."""
+    clear_alerts()
+    return {"status": "cleared"}
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
