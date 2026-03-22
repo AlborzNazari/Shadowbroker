@@ -7,10 +7,10 @@ import feedparser
 from services.network_utils import fetch_with_curl
 from services.fetchers._store import latest_data, _data_lock, _mark_fresh
 from services.fetchers.retry import with_retry
-
+ 
 logger = logging.getLogger("services.data_fetcher")
-
-
+ 
+ 
 # Keyword -> coordinate mapping for geocoding news articles
 _KEYWORD_COORDS = {
     "venezuela": (7.119, -66.589),
@@ -128,15 +128,15 @@ _KEYWORD_COORDS = {
     "wonsan": (39.18, 127.48),
     "busan": (35.18, 129.07),
 }
-
+ 
 # Immutable after module load — sort by descending keyword length so
 # specific locations ("taiwan strait") match before generic ones ("taiwan")
 _SORTED_KEYWORDS = sorted(_KEYWORD_COORDS.items(), key=lambda x: len(x[0]), reverse=True)
-
-
+ 
+ 
 def _resolve_coords(text: str) -> tuple[float, float] | None:
     """Return (lat, lng) for the most specific keyword match, or None.
-
+ 
     Longer keywords are tried first. Space-padded keywords (" us ", " uk ")
     use substring matching on padded text; all others use word-boundary regex.
     """
@@ -149,42 +149,49 @@ def _resolve_coords(text: str) -> tuple[float, float] | None:
             if re.search(r'\b' + re.escape(kw) + r'\b', text):
                 return coords
     return None
-
-
+ 
+ 
 @with_retry(max_retries=1, base_delay=2)
 def fetch_news():
     from services.news_feed_config import get_feeds
     feed_config = get_feeds()
     feeds = {f["name"]: f["url"] for f in feed_config}
     source_weights = {f["name"]: f["weight"] for f in feed_config}
-
+ 
     clusters = {}
     _cluster_grid = {}
-
+ 
     def _fetch_feed(item):
         source_name, url = item
         try:
-            xml_data = fetch_with_curl(url, timeout=10).text
-            return source_name, feedparser.parse(xml_data)
-        except (requests.RequestException, ConnectionError, TimeoutError, ValueError, KeyError, OSError) as e:
+            resp = fetch_with_curl(url, timeout=10)
+            if not resp or not resp.text or resp.status_code >= 400:
+                logger.warning(f"Feed {source_name} returned HTTP {getattr(resp, 'status_code', '?')} — skipping")
+                return source_name, None
+            feed = feedparser.parse(resp.text)
+            if not feed or not feed.entries:
+                logger.warning(f"Feed {source_name} parsed but has no entries — skipping")
+                return source_name, None
+            return source_name, feed
+        except Exception as e:
             logger.warning(f"Feed {source_name} failed: {e}")
             return source_name, None
-
+ 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(feeds)) as pool:
         feed_results = list(pool.map(_fetch_feed, feeds.items()))
-
+ 
     for source_name, feed in feed_results:
         if not feed:
             continue
         for entry in feed.entries[:5]:
             title = entry.get('title', '')
             summary = entry.get('summary', '')
-
+ 
             _seismic_kw = ["earthquake", "seismic", "quake", "tremor", "magnitude", "richter"]
             _text_lower = (title + " " + summary).lower()
             if any(kw in _text_lower for kw in _seismic_kw):
                 continue
-
+ 
             if source_name == "GDACS":
                 alert_level = entry.get("gdacs_alertlevel", "Green")
                 if alert_level == "Red": risk_score = 10
@@ -193,15 +200,15 @@ def fetch_news():
             else:
                 risk_keywords = ['war', 'missile', 'strike', 'attack', 'crisis', 'tension', 'military', 'conflict', 'defense', 'clash', 'nuclear']
                 text = (title + " " + summary).lower()
-
+ 
                 risk_score = 1
                 for kw in risk_keywords:
                     if kw in text:
                         risk_score += 2
                 risk_score = min(10, risk_score)
-
+ 
             lat, lng = None, None
-
+ 
             if 'georss_point' in entry:
                 geo_parts = entry['georss_point'].split()
                 if len(geo_parts) == 2:
@@ -209,13 +216,13 @@ def fetch_news():
             elif 'where' in entry and hasattr(entry['where'], 'coordinates'):
                 coords = entry['where'].coordinates
                 lat, lng = coords[1], coords[0]
-
+ 
             if lat is None:
                 text = (title + " " + summary).lower()
                 result = _resolve_coords(text)
                 if result:
                     lat, lng = result
-
+ 
             if lat is not None:
                 key = None
                 cell_x, cell_y = int(lng // 4), int(lat // 4)
@@ -236,10 +243,10 @@ def fetch_news():
                     _cluster_grid.setdefault((cell_x, cell_y), []).append(key)
             else:
                 key = title
-
+ 
             if key not in clusters:
                 clusters[key] = []
-
+ 
             clusters[key].append({
                 "title": title,
                 "link": entry.get('link', ''),
@@ -248,12 +255,12 @@ def fetch_news():
                 "risk_score": risk_score,
                 "coords": [lat, lng] if lat is not None else None
             })
-
+ 
     news_items = []
     for key, articles in clusters.items():
         articles.sort(key=lambda x: (x['risk_score'], source_weights.get(x["source"], 0)), reverse=True)
         max_risk = articles[0]['risk_score']
-
+ 
         top_article = articles[0]
         news_items.append({
             "title": top_article["title"],
@@ -266,7 +273,7 @@ def fetch_news():
             "articles": articles,
             "machine_assessment": None
         })
-
+ 
     news_items.sort(key=lambda x: x['risk_score'], reverse=True)
     with _data_lock:
         latest_data['news'] = news_items
