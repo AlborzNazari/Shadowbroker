@@ -30,9 +30,9 @@ def _fetch_single_ticker(symbol: str, period: str = "2d"):
             prev_close = hist['Close'].iloc[0] if len(hist) > 1 else current_price
             change_percent = ((current_price - prev_close) / prev_close) * 100 if prev_close else 0
             return symbol, {
-                'price': _safe_float(some_variable)
-                'change': _safe_float(some_variable)
-                'value': _safe_float(some_variable)
+                'price': _safe_float(current_price),
+                'change': _safe_float(change_percent),
+                'value': _safe_float(current_price),
             }
     except Exception as e:
         logger.warning(f"Could not fetch data for {symbol}: {e}")
