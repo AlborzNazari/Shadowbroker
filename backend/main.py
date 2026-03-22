@@ -538,5 +538,107 @@ async def api_cctv_alerts_clear(request: Request):
     clear_alerts()
     return {"status": "cleared"}
 
+
+## -----------------------------------------------------------------------
+## DROP THIS BLOCK INTO main.py
+## Place it right after the existing CCTV Alert Pipeline section,
+## before the final `if __name__ == "__main__":` line.
+## -----------------------------------------------------------------------
+
+import httpx
+from urllib.parse import unquote
+
+# Allowlist of domains we will proxy — prevents open-proxy abuse
+_CCTV_PROXY_ALLOWED_HOSTS = {
+    "cctv.austinmobility.io",
+    "webcams.nyctmc.org",
+    "api.data.gov.sg",
+    "api.tfl.gov.uk",
+    "its.txdot.gov",
+}
+
+# Referer headers that each host expects — spoof them so the image servers
+# don't reject our server-side request with a 403.
+_CCTV_REFERERS = {
+    "cctv.austinmobility.io": "https://cctv.austinmobility.io/",
+    "webcams.nyctmc.org":      "https://webcams.nyctmc.org/",
+}
+
+@app.get("/api/cctv/proxy-image")
+@limiter.limit("300/minute")
+async def proxy_cctv_image(request: Request, url: str):
+    """
+    Server-side image proxy for CCTV sources that block direct browser requests
+    (CORS, missing Referer, IP restrictions).
+
+    Only proxies domains in _CCTV_PROXY_ALLOWED_HOSTS.
+    Returns the raw image bytes with the original Content-Type so the browser
+    renders it directly in an <img> tag.
+    """
+    decoded_url = unquote(url)
+
+    # --- Domain allowlist check ---
+    from urllib.parse import urlparse
+    parsed = urlparse(decoded_url)
+    host = parsed.netloc.lower().split(":")[0]  # strip port if present
+    if host not in _CCTV_PROXY_ALLOWED_HOSTS:
+        return Response(
+            content=f'{{"error": "Domain not allowed: {host}"}}',
+            status_code=403,
+            media_type="application/json",
+        )
+
+    referer = _CCTV_REFERERS.get(host, f"https://{host}/")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            r = await client.get(
+                decoded_url,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    "Referer": referer,
+                    "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+                },
+            )
+
+        if r.status_code == 200:
+            content_type = r.headers.get("content-type", "image/jpeg")
+            return Response(
+                content=r.content,
+                media_type=content_type,
+                headers={
+                    # Tell the browser it can cache this for the refresh interval
+                    "Cache-Control": "public, max-age=30",
+                    "X-Proxy-Source": host,
+                },
+            )
+        else:
+            # Return a transparent 1x1 GIF so the <img> tag doesn't show a broken icon
+            TRANSPARENT_GIF = (
+                b"\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00"
+                b"\xff\xff\xff\x00\x00\x00\x21\xf9\x04\x00\x00\x00\x00\x00"
+                b"\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b"
+            )
+            logger.warning(f"CCTV proxy upstream returned {r.status_code} for {decoded_url}")
+            return Response(
+                content=TRANSPARENT_GIF,
+                media_type="image/gif",
+                status_code=200,
+                headers={"X-Proxy-Upstream-Status": str(r.status_code)},
+            )
+
+    except httpx.TimeoutException:
+        logger.warning(f"CCTV proxy timeout: {decoded_url}")
+        return Response(status_code=504)
+    except Exception as exc:
+        logger.error(f"CCTV proxy error for {decoded_url}: {exc}")
+        return Response(status_code=502)
+
+
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
