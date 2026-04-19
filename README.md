@@ -37,7 +37,7 @@ This data is scattered across dozens of tools and APIs. ShadowBroker began as an
 
 The project does not introduce new surveillance capabilities — it aggregates and visualizes existing public datasets, including public aircraft registration records. It is fully open-source so anyone can audit exactly what data is accessed and how. No user data is collected or transmitted — the dashboard runs entirely in your browser against a self-hosted backend.
 
----
+--
 
 ## Interesting Use Cases
 
