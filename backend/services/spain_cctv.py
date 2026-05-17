@@ -31,7 +31,7 @@ import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional
 
 import requests
-
+import time
 from services.cctv_pipeline import BaseCCTVIngestor
 
 logger = logging.getLogger(__name__)
