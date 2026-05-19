@@ -1,5 +1,5 @@
 """
-USA CCTV Ingestor — v2.0
+USA CCTV Ingestor — v2.1
 ========================
 US traffic camera sources covering strategic military corridor states.
 All external image URLs are routed through /api/cctv/proxy-image to
@@ -15,10 +15,19 @@ Priority states chosen for proximity to major military installations:
   - Georgia           — Fort Moore, Fort Eisenhower, Robins AFB, Moody AFB
 
 Author: Alborz Nazari (github.com/AlborzNazari)
+
+Changelog v2.1:
+  - Added import time
+  - Removed unused module-level _HEADERS constant
+  - _fetch(): added HTTP 429 rate-limit detection with Retry-After respect
+  - _fetch(): standardized User-Agent to identify project and contact point
+  - _fetch(): returns None on 429 so callers skip gracefully this cycle
+  - CaliforniaDOTIngestor: added 1s sleep between the two district URL fetches
 """
 
 import logging
 import os
+import time
 from typing import List, Dict, Any
 from urllib.parse import quote as urlquote
 
@@ -28,12 +37,48 @@ from services.cctv_pipeline import BaseCCTVIngestor
 
 logger = logging.getLogger(__name__)
 
-_HEADERS = {"User-Agent": "Shadowbroker-OSINT/2.0"}
+# ---------------------------------------------------------------------------
+# Shared User-Agent — identifies the project and author for server operators
+# ---------------------------------------------------------------------------
+_USER_AGENT = (
+    "Shadowbroker-OSINT/2.1 "
+    "(+github.com/AlborzNazari/Shadowbroker; research only; "
+    "contact via GitHub issues)"
+)
 
 
+# ---------------------------------------------------------------------------
+# CHANGED: _fetch() now handles HTTP 429 rate limiting and uses a proper
+# User-Agent that identifies the project to server operators.
+#
+# Behaviour on 429:
+#   - Reads Retry-After header if present (defaults to 60s if absent)
+#   - Logs the backoff duration
+#   - Sleeps for the requested duration
+#   - Returns None so the caller skips this cycle cleanly
+#
+# Return contract (unchanged from v2.0):
+#   - Returns requests.Response on success (any non-429 status)
+#   - Returns None on 429 or on network/timeout exception
+#   - Callers must check: if r is None or not r.ok
+# ---------------------------------------------------------------------------
 def _fetch(url: str, timeout: int = 20):
     try:
-        return requests.get(url, timeout=timeout, allow_redirects=True, headers=_HEADERS)
+        r = requests.get(
+            url,
+            timeout=timeout,
+            allow_redirects=True,
+            headers={"User-Agent": _USER_AGENT},
+        )
+        if r.status_code == 429:
+            retry_after = int(r.headers.get("Retry-After", 60))
+            logger.warning(
+                "_fetch: rate limited by %s — backing off %ds as requested",
+                url, retry_after,
+            )
+            time.sleep(retry_after)
+            return None
+        return r
     except Exception as e:
         logger.error(f"_fetch failed for {url}: {e}")
         return None
@@ -309,15 +354,21 @@ class FloridaDOTIngestor(BaseCCTVIngestor):
 
 # ---------------------------------------------------------------------------
 # 6. California — Caltrans
+# CHANGED: added time.sleep(1) between the two district URL fetches to avoid
+# hitting Caltrans servers simultaneously. The sleep fires regardless of
+# whether the first fetch succeeded — the goal is to space the requests out.
 # ---------------------------------------------------------------------------
-
 class CaliforniaDOTIngestor(BaseCCTVIngestor):
     def fetch_data(self) -> List[Dict[str, Any]]:
         cameras = []
-        for district_url in [
+        district_urls = [
             "https://cwwp2.dot.ca.gov/data/d7/cctv/cctvStatusD07.json",
             "https://cwwp2.dot.ca.gov/data/d11/cctv/cctvStatusD11.json",
-        ]:
+        ]
+        for i, district_url in enumerate(district_urls):
+            # CHANGED: sleep 1s before each request after the first one
+            if i > 0:
+                time.sleep(1)
             r = _fetch(district_url)
             if r is not None and r.ok:
                 try:
@@ -341,7 +392,6 @@ class CaliforniaDOTIngestor(BaseCCTVIngestor):
         return self._seed_cameras()
 
     def _seed_cameras(self) -> List[Dict[str, Any]]:
-        # Caltrans image endpoint confirmed pattern
         def ca_img(d, cam_id): return f"https://cwwp2.dot.ca.gov/data/d{d}/cctv/image/{cam_id}.jpg"
         seeds = [
             ("CA-S001", 33.3800, -117.5800, "I-5 Camp Pendleton north gate",         ca_img("11", "0001")),
