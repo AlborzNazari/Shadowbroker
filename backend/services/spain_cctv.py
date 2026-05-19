@@ -1,5 +1,5 @@
 """
-Spain CCTV Ingestor — v2.0
+Spain CCTV Ingestor — v2.1
 ==========================
 Homogeneous national coverage across all Spanish regions using confirmed
 working public open data sources. No API keys required for any source.
@@ -23,20 +23,35 @@ with DGT national seed cameras at motorway interchange points across all
 17 regions including Canary Islands and Balearic Islands.
 
 Author: Alborz Nazari (github.com/AlborzNazari)
+
+Changelog v2.1:
+  - _fetch(): added HTTP 429 rate-limit detection with Retry-After respect
+  - _fetch(): standardized User-Agent to identify project and contact point
+  - _fetch(): returns None on 429 so callers skip gracefully this cycle
 """
 
 import logging
 import re
+import time
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional
 
 import requests
-import time
+
 from services.cctv_pipeline import BaseCCTVIngestor
 
 logger = logging.getLogger(__name__)
 
 _KML_NS = {"kml": "http://www.opengis.net/kml/2.2"}
+
+# ---------------------------------------------------------------------------
+# Shared User-Agent — identifies the project and author for server operators
+# ---------------------------------------------------------------------------
+_USER_AGENT = (
+    "Shadowbroker-OSINT/2.1 "
+    "(+github.com/AlborzNazari/Shadowbroker; research only; "
+    "contact via GitHub issues)"
+)
 
 
 def _find_element(element: ET.Element, tag: str) -> Optional[ET.Element]:
@@ -64,12 +79,38 @@ def _extract_img_src(html_fragment: str) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# CHANGED: _fetch() now handles HTTP 429 rate limiting and uses a proper
+# User-Agent that identifies the project to server operators.
+#
+# Behaviour on 429:
+#   - Reads Retry-After header if present (defaults to 60s if absent)
+#   - Logs the backoff duration
+#   - Sleeps for the requested duration
+#   - Returns None so the caller skips this cycle cleanly
+#
+# Return contract (unchanged from v2.0):
+#   - Returns requests.Response on success (any non-429 status)
+#   - Returns None on 429 or on network/timeout exception
+#   - Callers must check: if r is None or not r.ok
+# ---------------------------------------------------------------------------
 def _fetch(url: str, timeout: int = 20):
     try:
-        return requests.get(
-            url, timeout=timeout, allow_redirects=True,
-            headers={"User-Agent": "Shadowbroker-OSINT/2.0"}
+        r = requests.get(
+            url,
+            timeout=timeout,
+            allow_redirects=True,
+            headers={"User-Agent": _USER_AGENT},
         )
+        if r.status_code == 429:
+            retry_after = int(r.headers.get("Retry-After", 60))
+            logger.warning(
+                "_fetch: rate limited by %s — backing off %ds as requested",
+                url, retry_after,
+            )
+            time.sleep(retry_after)
+            return None
+        return r
     except Exception as e:
         logger.error(f"_fetch failed for {url}: {e}")
         return None
@@ -153,7 +194,7 @@ DGT_SEED_CAMERAS = [
     (1025, 36.5271, -6.2886, "A-4 Cadiz", "Andalusia"),
     (1026, 37.2614, -6.9447, "A-49 Huelva", "Andalusia"),
     (1027, 37.7917, -3.7749, "A-44 Jaen", "Andalusia"),
-    # Catalonia — DGT covers AP-7/A-2
+    # Catalonia
     (1010, 41.3888, 2.1590, "AP-7 Barcelona S", "Catalonia"),
     (1011, 41.4100, 2.1800, "A-2 Barcelona W", "Catalonia"),
     (1012, 41.1200, 1.2500, "AP-7 Tarragona", "Catalonia"),
